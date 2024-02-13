@@ -7,12 +7,14 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <cerrno>
+#include <stdio.h>
 
 const int PORT = 8080;
 const std::string WEB_ROOT = "./";
 
 void handleClient(int clientSocket)
 {
+    /* -- CLIENT HANDLER CONFIG ------------------------ */
     char buffer[1024];
     memset(buffer, 0, sizeof(buffer));
     read(clientSocket, buffer, sizeof(buffer));
@@ -25,6 +27,9 @@ void handleClient(int clientSocket)
     std::string method, filePath, httpVersion;
     requestLineStream >> method >> filePath >> httpVersion;
 
+    printf("\t🔌✅ ==> ACCEPTED CONNECTION for file: %s\n", filePath.c_str());
+
+    /* -- ROUTES ------------------------ */
     if (filePath == "/" || filePath.empty())
     {
         filePath = "/index.html";
@@ -40,6 +45,7 @@ void handleClient(int clientSocket)
 
     std::string fullPath = WEB_ROOT + filePath;
 
+    /* -- SERVER RESPONSES -------------- */
     std::ifstream file(fullPath);
     if (!file.is_open())
     {
@@ -62,37 +68,58 @@ void handleClient(int clientSocket)
     close(clientSocket);
 }
 
-int main()
+int requirePortBindOK(int &serverSocket, sockaddr_in &serverAddress)
 {
 
-    int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverSocket == -1)
+    if (::bind(serverSocket, reinterpret_cast<struct sockaddr *>(&serverAddress), sizeof(serverAddress)) == -1)
     {
-        std::cerr << "Error creating socket\n";
+        printf("\t🚢🚫 ==> ERROR BINDING on port %d\n", PORT);
+        close(serverSocket);
         return 1;
     }
+
+    return 0;
+}
+
+int requireListeningOK(int &serverSocket)
+{
+    if (listen(serverSocket, 10) == -1)
+    {
+        printf("\t📡🚫 ==> ERROR LISTENING on port %d\n", PORT);
+        close(serverSocket);
+        return 1;
+    }
+
+    return 0;
+}
+
+int requireSocketCreatedOK(int &serverSocket)
+{
+    if (serverSocket == -1)
+    {
+        printf("\t📞🚫 ==> ERROR CREATING SOCKET on port %d\n", PORT);
+        return 1;
+    }
+
+    return 0;
+}
+
+int main()
+{
 
     sockaddr_in serverAddress;
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_addr.s_addr = INADDR_ANY;
     serverAddress.sin_port = htons(PORT);
+    int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
 
-    if (::bind(serverSocket, reinterpret_cast<struct sockaddr *>(&serverAddress), sizeof(serverAddress)) == -1)
-    {
-        std::cerr << "Error listening on port " << PORT << "\n";
-        close(serverSocket);
-        return 1;
-    }
+    requireSocketCreatedOK(serverSocket);
+    requirePortBindOK(serverSocket, serverAddress);
+    requireListeningOK(serverSocket);
 
-    if (listen(serverSocket, 10) == -1)
-    {
-        std::cerr << "Error listening on port " << PORT << "\n";
-        close(serverSocket);
-        return 1;
-    }
+    printf("\t📡 ==> OK SERVER LISTENING on port %d...\n", PORT);
 
-    std::cout << "Server listening on port " << PORT << "...\n";
-
+    /* -- CLIENT HANDLER LOOP  ---------------- */
     while (true)
     {
         sockaddr_in clientAddress;
@@ -101,11 +128,9 @@ int main()
 
         if (clientSocket == -1)
         {
-            std::cerr << "Error accepting connections: " << strerror(errno) << "\n";
+            printf("\t🔌🚫 ==> ERROR accepting connections: %s\n", strerror(errno));
             continue;
         }
-
-        std::cout << "Accepted connection\n";
 
         handleClient(clientSocket);
     }
